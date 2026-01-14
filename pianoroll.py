@@ -18,8 +18,12 @@ NOTE_HIT = (126, 255, 153)
 NOTE_MISS = (255, 109, 120)
 TEXT_COLOR = (240, 240, 255)
 
-ROWS = ["QWERTYUIOP", "ASDFGHJKL", "ZXCVBNM"]
-ALL_LETTERS = "".join(ROWS)
+ROWS = [
+    ("QWERTYUIOP", "ЙЦУКЕНГШЩЗ"),
+    ("ASDFGHJKL", "ФЫВАПРОЛД"),
+    ("ZXCVBNM", "ЯЧСМИТЬ"),
+]
+ALL_LETTERS = "".join("".join(row) for rows in ROWS for row in rows)
 
 LANE_TOP = 60
 LANE_BOTTOM = SCREEN_HEIGHT - 140
@@ -59,7 +63,7 @@ class PianoRoll:
         self.font = pygame.font.Font(None, 32)
         self.large_font = pygame.font.Font(None, 48)
 
-        self.lanes = self._build_lanes()
+        self.lanes, self.lane_labels = self._build_lanes()
         self.notes: list[Note] = []
         self.last_spawn = time.time()
 
@@ -71,20 +75,25 @@ class PianoRoll:
         self.running = True
         self.start_time = time.time()
 
-    def _build_lanes(self) -> dict[str, float]:
-        lanes: dict[str, float] = {}
+    def _build_lanes(self) -> tuple[dict[str, tuple[float, int]], list[tuple[float, int, str]]]:
+        lanes: dict[str, tuple[float, int]] = {}
+        labels: list[tuple[float, int, str]] = []
         available_width = SCREEN_WIDTH - 120
-        for row_index, row in enumerate(ROWS):
-            row_width = available_width * (len(row) / len(ROWS[0]))
+        for row_index, (latin_row, cyrillic_row) in enumerate(ROWS):
+            row_width = available_width * (len(latin_row) / len(ROWS[0][0]))
             start_x = (SCREEN_WIDTH - row_width) / 2
-            gap = row_width / len(row)
-            for i, letter in enumerate(row):
-                lanes[letter] = start_x + i * gap + gap / 2
-        return lanes
+            gap = row_width / len(latin_row)
+            for i, latin_letter in enumerate(latin_row):
+                cyrillic_letter = cyrillic_row[i]
+                x = start_x + i * gap + gap / 2
+                lanes[latin_letter] = (x, row_index)
+                lanes[cyrillic_letter] = (x, row_index)
+                labels.append((x, row_index, f"{latin_letter}/{cyrillic_letter}"))
+        return lanes, labels
 
     def spawn_note(self) -> None:
         letter = random.choice(ALL_LETTERS)
-        x = self.lanes[letter]
+        x, _ = self.lanes[letter]
         self.notes.append(Note(letter=letter, x=x, y=LANE_TOP - 40))
 
     def handle_hit(self, letter: str) -> None:
@@ -122,10 +131,10 @@ class PianoRoll:
         self.notes = [note for note in self.notes if note.y < SCREEN_HEIGHT + 60]
 
     def draw_lanes(self) -> None:
-        for letter, x in self.lanes.items():
+        for x, row_index, label_text in self.lane_labels:
             pygame.draw.line(self.screen, LANE_COLOR, (x, LANE_TOP), (x, LANE_BOTTOM), 3)
-            label = self.font.render(letter, True, TEXT_COLOR)
-            rect = label.get_rect(center=(x, LANE_BOTTOM + 24))
+            label = self.font.render(label_text, True, TEXT_COLOR)
+            rect = label.get_rect(center=(x, LANE_BOTTOM + 24 + row_index * 24))
             self.screen.blit(label, rect)
         pygame.draw.line(self.screen, TARGET_LINE, (80, TARGET_Y), (SCREEN_WIDTH - 80, TARGET_Y), 2)
 
