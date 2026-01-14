@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import pygame
 
 SCREEN_WIDTH = 1000
-SCREEN_HEIGHT = 700
+SCREEN_HEIGHT = 720
 FPS = 60
 
 BACKGROUND = (12, 12, 18)
@@ -19,18 +19,31 @@ NOTE_MISS = (255, 109, 120)
 TEXT_COLOR = (240, 240, 255)
 
 ROWS = [
-    ("QWERTYUIOP", "ЙЦУКЕНГШЩЗ"),
-    ("ASDFGHJKL", "ФЫВАПРОЛД"),
-    ("ZXCVBNM", "ЯЧСМИТЬ"),
+    ("QWERTYUIOP", "ЙЦУКЕНГШЩЗ", 0.0),
+    ("ASDFGHJKL", "ФЫВАПРОЛД", 0.5),
+    ("ZXCVBNM", "ЯЧСМИТЬ", 1.0),
 ]
-ALL_LETTERS = "".join("".join(row) for rows in ROWS for row in rows)
+ALL_LETTERS = "".join("".join((latin, cyrillic)) for latin, cyrillic, _ in ROWS)
 
 LANE_TOP = 60
 LANE_BOTTOM = SCREEN_HEIGHT - 140
 TARGET_Y = LANE_BOTTOM - 10
 
-SPAWN_INTERVAL = 0.45
-FALL_SPEED = 320.0
+KEY_SIZE = 44
+KEY_GAP = 8
+
+LEVEL_SETTINGS = [
+    (0.65, 250.0),
+    (0.6, 270.0),
+    (0.55, 290.0),
+    (0.5, 310.0),
+    (0.45, 330.0),
+    (0.4, 350.0),
+    (0.36, 370.0),
+    (0.32, 390.0),
+    (0.28, 420.0),
+    (0.24, 450.0),
+]
 
 WINDOWS = {
     "perfect": 14,
@@ -63,9 +76,12 @@ class PianoRoll:
         self.font = pygame.font.Font(None, 32)
         self.large_font = pygame.font.Font(None, 48)
 
-        self.lanes, self.lane_labels = self._build_lanes()
+        self.lanes, self.key_positions = self._build_lanes()
         self.notes: list[Note] = []
         self.last_spawn = time.time()
+
+        self.level = 1
+        self.spawn_interval, self.fall_speed = LEVEL_SETTINGS[self.level - 1]
 
         self.score = 0
         self.combo = 0
@@ -75,26 +91,35 @@ class PianoRoll:
         self.running = True
         self.start_time = time.time()
 
-    def _build_lanes(self) -> tuple[dict[str, tuple[float, int]], list[tuple[float, int, str]]]:
+    def _build_lanes(self) -> tuple[dict[str, tuple[float, int]], list[tuple[pygame.Rect, str]]]:
         lanes: dict[str, tuple[float, int]] = {}
-        labels: list[tuple[float, int, str]] = []
-        available_width = SCREEN_WIDTH - 120
-        for row_index, (latin_row, cyrillic_row) in enumerate(ROWS):
-            row_width = available_width * (len(latin_row) / len(ROWS[0][0]))
-            start_x = (SCREEN_WIDTH - row_width) / 2
-            gap = row_width / len(latin_row)
+        keys: list[tuple[pygame.Rect, str]] = []
+        max_keys = len(ROWS[0][0])
+        row_width = max_keys * KEY_SIZE + (max_keys - 1) * KEY_GAP
+        start_x = (SCREEN_WIDTH - row_width) / 2
+        base_y = LANE_BOTTOM + 20
+        for row_index, (latin_row, cyrillic_row, offset_units) in enumerate(ROWS):
+            row_x = start_x + offset_units * (KEY_SIZE + KEY_GAP)
+            row_y = base_y + row_index * (KEY_SIZE + KEY_GAP)
             for i, latin_letter in enumerate(latin_row):
                 cyrillic_letter = cyrillic_row[i]
-                x = start_x + i * gap + gap / 2
-                lanes[latin_letter] = (x, row_index)
-                lanes[cyrillic_letter] = (x, row_index)
-                labels.append((x, row_index, f"{latin_letter}/{cyrillic_letter}"))
-        return lanes, labels
+                x = row_x + i * (KEY_SIZE + KEY_GAP)
+                rect = pygame.Rect(x, row_y, KEY_SIZE, KEY_SIZE)
+                center_x = rect.centerx
+                lanes[latin_letter] = (center_x, row_index)
+                lanes[cyrillic_letter] = (center_x, row_index)
+                keys.append((rect, f"{latin_letter}/{cyrillic_letter}"))
+        return lanes, keys
 
     def spawn_note(self) -> None:
         letter = random.choice(ALL_LETTERS)
         x, _ = self.lanes[letter]
         self.notes.append(Note(letter=letter, x=x, y=LANE_TOP - 40))
+
+    def set_level(self, level: int) -> None:
+        level = max(1, min(10, level))
+        self.level = level
+        self.spawn_interval, self.fall_speed = LEVEL_SETTINGS[self.level - 1]
 
     def handle_hit(self, letter: str) -> None:
         candidates = [note for note in self.notes if note.letter == letter and not note.hit and not note.missed]
@@ -124,18 +149,21 @@ class PianoRoll:
         for note in self.notes:
             if note.hit or note.missed:
                 continue
-            note.y += FALL_SPEED * dt
+            note.y += self.fall_speed * dt
             if note.y > TARGET_Y + WINDOWS["good"]:
                 note.missed = True
                 self.register_miss()
         self.notes = [note for note in self.notes if note.y < SCREEN_HEIGHT + 60]
 
     def draw_lanes(self) -> None:
-        for x, row_index, label_text in self.lane_labels:
-            pygame.draw.line(self.screen, LANE_COLOR, (x, LANE_TOP), (x, LANE_BOTTOM), 3)
+        for rect, label_text in self.key_positions:
+            center_x = rect.centerx
+            pygame.draw.line(self.screen, LANE_COLOR, (center_x, LANE_TOP), (center_x, LANE_BOTTOM), 3)
+            pygame.draw.rect(self.screen, LANE_COLOR, rect, border_radius=6)
+            pygame.draw.rect(self.screen, TARGET_LINE, rect, 2, border_radius=6)
             label = self.font.render(label_text, True, TEXT_COLOR)
-            rect = label.get_rect(center=(x, LANE_BOTTOM + 24 + row_index * 24))
-            self.screen.blit(label, rect)
+            label_rect = label.get_rect(center=rect.center)
+            self.screen.blit(label, label_rect)
         pygame.draw.line(self.screen, TARGET_LINE, (80, TARGET_Y), (SCREEN_WIDTH - 80, TARGET_Y), 2)
 
     def draw_notes(self) -> None:
@@ -156,7 +184,10 @@ class PianoRoll:
         total = self.hits + self.misses
         if total > 0:
             accuracy = math.floor((self.hits / total) * 100)
-        hud_text = f"Очки: {self.score}  Комбо: {self.combo}  Макс. Комбо: {self.max_combo}  Точность: {accuracy}%"
+        hud_text = (
+            f"Очки: {self.score}  Комбо: {self.combo}  Макс. Комбо: {self.max_combo}  "
+            f"Точность: {accuracy}%  Уровень: {self.level}"
+        )
         hud = self.font.render(hud_text, True, TEXT_COLOR)
         self.screen.blit(hud, (40, 20))
 
@@ -164,9 +195,11 @@ class PianoRoll:
         title = self.large_font.render("Пианорол", True, TEXT_COLOR)
         subtitle = self.font.render("Нажимайте буквы в момент касания линии", True, TEXT_COLOR)
         start = self.font.render("Нажмите пробел, чтобы начать", True, TEXT_COLOR)
+        level_hint = self.font.render("Уровни 1-0: выбрать сложность", True, TEXT_COLOR)
         self.screen.blit(title, title.get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 - 40)))
         self.screen.blit(subtitle, subtitle.get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 4)))
         self.screen.blit(start, start.get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 40)))
+        self.screen.blit(level_hint, level_hint.get_rect(center=(SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2 + 76)))
 
     def run(self) -> None:
         playing = False
@@ -178,6 +211,21 @@ class PianoRoll:
                 if event.type == pygame.KEYDOWN:
                     if event.key == pygame.K_ESCAPE:
                         self.running = False
+                    if event.key in (pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4, pygame.K_5,
+                                     pygame.K_6, pygame.K_7, pygame.K_8, pygame.K_9, pygame.K_0):
+                        level_map = {
+                            pygame.K_1: 1,
+                            pygame.K_2: 2,
+                            pygame.K_3: 3,
+                            pygame.K_4: 4,
+                            pygame.K_5: 5,
+                            pygame.K_6: 6,
+                            pygame.K_7: 7,
+                            pygame.K_8: 8,
+                            pygame.K_9: 9,
+                            pygame.K_0: 10,
+                        }
+                        self.set_level(level_map[event.key])
                     if not playing and event.key == pygame.K_SPACE:
                         playing = True
                         self.start_time = time.time()
@@ -191,7 +239,7 @@ class PianoRoll:
 
             if playing:
                 now = time.time()
-                if now - self.last_spawn >= SPAWN_INTERVAL:
+                if now - self.last_spawn >= self.spawn_interval:
                     self.spawn_note()
                     self.last_spawn = now
                 self.update_notes(dt)
